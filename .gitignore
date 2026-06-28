@@ -1,0 +1,42 @@
+# Environment / secrets
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+piyolo/
+venv/
+.venv/
+env/
+
+# Model weights / large binaries (track separately or via Git LFS if needed)
+*.onnx
+*.pt
+*.pth
+
+# Captured images / snapshots
+snapshot_*.jpg
+*.jpg
+*.jpeg
+*.png
+!static/**/*.png
+!static/**/*.jpg
+
+# Logs
+*.log
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Flask / Jinja cache
+*.pyc
+instance/
+.webassets-cache

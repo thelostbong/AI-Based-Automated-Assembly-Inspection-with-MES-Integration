@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Marker Rolling — Async Photo Run</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0f1221; --card:#14182a; --text:#e6ecff; --muted:#9aa3c7; --good:#19d27f; --bad:#ff5577; --accent:#7aa2ff; --radius:16px; --shadow:0 12px 40px rgba(0,0,0,.35);}
+    *{box-sizing:border-box;}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:radial-gradient(900px 400px at 10% -10%,#1a2050,transparent),var(--bg);color:var(--text);}
+    header{padding:20px 24px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+    h1{font-size:22px;margin:0;letter-spacing:.3px;}
+    .pill{font-size:13px;padding:6px 10px;border-radius:10px;background:rgba(255,255,255,.06);}
+    .btn{font-size:14px;padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);color:var(--text);cursor:pointer;}
+    .btn:hover{background:rgba(255,255,255,.16);}
+    .btn:disabled{opacity:.5;cursor:not-allowed;}
+    .dot{width:12px;height:12px;border-radius:50%;background:var(--bad);box-shadow:0 0 20px rgba(255,85,119,.5);}
+    .dot.good{background:var(--good);box-shadow:0 0 20px rgba(25,210,127,.45);}
+    main{display:grid;grid-template-columns:1.2fr 1fr;gap:16px;padding:0 24px 24px;}
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;}
+    .row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    .cfg{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+    label{display:flex;align-items:center;gap:6px;}
+    input[type="number"], select, input[type="text"]{width:120px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--text);}
+    input#stationInput{width:200px;}
+    .progress{width:100%;height:14px;background:rgba(255,255,255,.08);border-radius:10px;overflow:hidden;}
+    .bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),#6be3ff);transition:width .25s ease;}
+    .statusline{font-size:14px;color:var(--muted);}
+    table{width:100%;border-collapse:collapse;margin-top:12px;}
+    th,td{text-align:left;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08);}
+    th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;}
+    .ok{color:var(--good);font-weight:700;}
+    .no{color:var(--bad);font-weight:700;}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:10px;}
+    figure{margin:0;}
+    figure img{width:100%;height:auto;border-radius:10px;display:block;}
+    figure figcaption{font-size:12px;color:var(--muted);margin-top:6px;}
+    footer{opacity:.7;padding:4px 24px 24px;font-size:12px;line-height:1.4;}
+    a{color:var(--accent);text-decoration:none;}
+    .frame{aspect-ratio:16/9;width:100%;background:#090a10;border-radius:12px;display:grid;place-items:center;overflow:hidden;border:1px solid rgba(255,255,255,.12)}
+    .frame img{width:100%;height:100%;object-fit:contain;display:block}
+    .hint{font-size:12px;color:var(--muted)}
+    .chip{background:#1b2030;color:#cbd5e1;border:1px solid #2a2f42;padding:6px 10px;border-radius:999px;font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <div id="statusDot" class="dot"></div>
+    <h1>Marker Rolling — Async Photo Run</h1>
+    <span class="pill" id="rollingText">ROLLING: …</span>
+    <div class="cfg">
+      <label>Camera
+        <select id="camSelect" title="Select camera">
+          {% for idx in cams %}
+            <option value="{{ idx }}" {% if idx == default_cam %}selected{% endif %}>Cam {{ idx }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <button class="btn" id="startStreamBtn">Start Stream</button>
+      <button class="btn" id="stopStreamBtn"  disabled>Stop Stream</button>
+
+      <button class="btn" id="startBtn">Start capture</button>
+      <button class="btn" id="resetBtn">Reset</button>
+
+      <input id="stationInput" type="text" placeholder="Station ID (optional)" />
+      <button class="btn" id="sendMesBtn">Send to MES</button>
+
+      <a href="/" class="btn">Back to Detector</a>
+    </div>
+  </header>
+
+  <main>
+    <!-- Live preview -->
+    <section class="card">
+      <h3 style="margin:4px 0 10px;">Live Preview <span id="previewState" class="chip">stopped</span></h3>
+      <div class="frame">
+        <img id="preview" alt="live preview" />
+      </div>
+      <div class="hint" style="margin-top:8px">
+  Preview shows the raw camera stream. When you click <b>Start capture</b>, the stream stops and each still is analyzed with the
+  <b>marker model (bt.onnx)</b>. Thumbnails below show the <b>marker-only</b> overlay (bbox + center).
+</div>
+
+    <!-- Controls + Results -->
+    <section class="card">
+      <div class="row" style="margin-bottom:6px;">
+        <div class="statusline" id="statusText">Idle</div>
+      </div>
+
+      <div class="cfg" style="margin-bottom:8px;">
+        <label>Shots <input id="shotsInput" type="number" min="2" max="50" step="1" value="10"/></label>
+        <label>Delay(s) <input id="delayInput" type="number" min="0" max="10" step="0.1" value="2.0"/></label>
+        <label>Tolerance(px) <input id="thrInput" type="number" min="0" max="1000" step="0.1" value="10.0"/></label>
+      </div>
+
+      <div class="progress" aria-label="Capture progress"><div class="bar" id="bar"></div></div>
+      <div class="row" style="margin-top:8px;">
+        <div>Latest run parameters: <span id="paramsText">—</span></div>
+        <div style="margin-left:auto;">Progress: <span id="progText">0/0</span></div>
+      </div>
+
+      <table id="shotsTable" style="display:none; margin-top:14px;">
+        <thead>
+          <tr><th>#</th><th>Marker</th><th>Center (cx, cy)</th><th>&Delta; from prev (px)</th><th>Moved?</th></tr>
+        </thead>
+        <tbody id="shotsBody"></tbody>
+      </table>
+
+      <div class="grid" id="thumbGrid" aria-live="polite"></div>
+      <div id="note" style="margin-top:10px; color: var(--muted);"></div>
+    </section>
+  </main>
+
+  <footer>Movement is considered when center shift (or bbox diag shift) &gt; <code>Tolerance(px)</code> (default 10 px). You can send results to MES manually with the button above (auto-send may also be enabled in the server).</footer>
+
+  <script>
+    const cams = {{ cams | tojson }};
+    let selectedCam = {{ default_cam | tojson }};
+
+    const preview = document.getElementById('preview');
+    const previewState = document.getElementById('previewState');
+
+    const camSelect = document.getElementById('camSelect');
+    const startStreamBtn = document.getElementById('startStreamBtn');
+    const stopStreamBtn  = document.getElementById('stopStreamBtn');
+
+    const startBtn = document.getElementById('startBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const sendMesBtn = document.getElementById('sendMesBtn');
+    const stationInput = document.getElementById('stationInput');
+
+    const rollingText = document.getElementById('rollingText');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const shotsInput = document.getElementById('shotsInput');
+    const delayInput = document.getElementById('delayInput');
+    const thrInput = document.getElementById('thrInput');
+    const bar = document.getElementById('bar');
+    const progText = document.getElementById('progText');
+    const paramsText = document.getElementById('paramsText');
+    const shotsTable = document.getElementById('shotsTable');
+    const shotsBody = document.getElementById('shotsBody');
+    const grid = document.getElementById('thumbGrid');
+    const note = document.getElementById('note');
+
+    let pollTimer = null;
+    let previewRunning = false;
+
+    function setPreviewCam(idx){
+      selectedCam = idx;
+      if (previewRunning) {
+        // refresh stream for the new camera
+        startStream().catch(()=>{});
+      }
+    }
+
+    function uiSetPreviewState(running){
+      previewRunning = !!running;
+      previewState.textContent = running ? 'streaming' : 'stopped';
+      startStreamBtn.disabled = running;
+      stopStreamBtn.disabled  = !running;
+    }
+
+    async function startStream(){
+      try{
+        // Ask server to start preview on this camera
+        const r = await fetch(`/rolling/start/${selectedCam}`, { method:'POST' });
+        const j = await r.json();
+        if(!r.ok || !j.ok) throw new Error(j.error || r.statusText);
+        // Point <img> to the stream (cache-buster)
+        preview.src = `/rolling/stream/${selectedCam}?t=${Date.now()}`;
+        uiSetPreviewState(true);
+      }catch(e){
+        console.error(e);
+        note.textContent = 'Failed to start stream';
+        uiSetPreviewState(false);
+        preview.src = '';
+      }
+    }
+
+    async function stopStream(){
+      try{
+        await fetch('/rolling/stop', { method:'POST' });
+      }catch(e){ console.warn(e); }
+      // Clear client-side image to fully close the connection
+      preview.src = '';
+      uiSetPreviewState(false);
+    }
+
+    function setRollingUI(rolling, params) {
+      rollingText.textContent = 'ROLLING: ' + (rolling ? 'YES' : 'NO');
+      statusDot.classList.toggle('good', !!rolling);
+      if(params){
+        const { num_shots, delay_s, threshold_px, camera_idx } = params;
+        paramsText.textContent = `${num_shots} shots, ${delay_s}s delay, tol ${threshold_px}px, Cam ${camera_idx}`;
+        if (!document.activeElement || !document.activeElement.isSameNode(thrInput)) {
+          if (typeof threshold_px === 'number') thrInput.value = threshold_px;
+        }
+      } else {
+        paramsText.textContent = '—';
+      }
+    }
+
+    function setProgress(cur, total, text){
+      const pct = total > 0 ? Math.min(100, Math.round((cur/total)*100)) : 0;
+      bar.style.width = pct + '%';
+      progText.textContent = `${cur}/${total}`;
+      statusText.textContent = text || '';
+    }
+
+    function renderShotsTable(shots){
+      shotsBody.innerHTML = '';
+      if(!shots || !shots.length){ shotsTable.style.display='none'; return; }
+      shotsTable.style.display='';
+      for(const s of shots){
+        const tr = document.createElement('tr');
+        const marker = s.has_marker ? '<span class="ok">Yes</span>' : '<span class="no">No</span>';
+        const center = (s.cx==null||s.cy==null) ? '—' : `(${s.cx.toFixed(1)}, ${s.cy.toFixed(1)})`;
+        const dist = (s.dist_from_prev==null) ? '—' : s.dist_from_prev.toFixed(2);
+        const moved = s.moved ? '<span class="ok">Yes</span>' : 'No';
+        tr.innerHTML = `<td>${s.i}</td><td>${marker}</td><td>${center}</td><td>${dist}</td><td>${moved}</td>`;
+        shotsBody.appendChild(tr);
+      }
+    }
+
+    function renderThumbs(shots){
+      grid.innerHTML = '';
+      if(!shots || !shots.length) return;
+      for(const s of shots){
+        const fig = document.createElement('figure');
+        const img = document.createElement('img');
+        img.alt = `Shot ${s.i}`;
+        if (s.img_url) img.src = s.img_url;
+        const cap = document.createElement('figcaption');
+        const moved = s.moved ? 'Moved' : 'Static';
+        const marker = s.has_marker ? 'Marker: Yes' : 'Marker: No';
+        const dist = (s.dist_from_prev==null) ? '—' : s.dist_from_prev.toFixed(2) + ' px';
+        cap.textContent = `#${s.i} • ${marker} • Δ ${dist} • ${moved}`;
+        fig.appendChild(img); fig.appendChild(cap);
+        grid.appendChild(fig);
+      }
+    }
+
+    async function pollStatusOnce(){
+      try{
+        const r = await fetch('/status', { cache:'no-store' });
+        const j = await r.json();
+        setRollingUI(!!j.rolling, j.params);
+        setProgress(j.progress?.current||0, j.progress?.total||0, j.status_text||'');
+        renderShotsTable(j.shots);
+        renderThumbs(j.shots);
+        note.textContent = j.error ? ('Error: ' + j.error) : '';
+        const running = !!j.running;
+        // disable controls while capturing
+        startBtn.disabled = running;
+        resetBtn.disabled = running;
+        camSelect.disabled = running;
+        startStreamBtn.disabled = running || previewRunning;
+        stopStreamBtn.disabled  = running || !previewRunning;
+        sendMesBtn.disabled = running; // allow send only when not capturing
+      }catch(e){ console.error(e); }
+    }
+
+    function startPolling(){
+      if (pollTimer) return;
+      pollTimer = setInterval(pollStatusOnce, 350);
+    }
+    function stopPolling(){
+      if (!pollTimer) return;
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
+    camSelect.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.value, 10);
+      if (!Number.isFinite(idx)) return;
+      setPreviewCam(idx);
+    });
+
+    startStreamBtn.addEventListener('click', async () => {
+      await startStream();
+    });
+
+    stopStreamBtn.addEventListener('click', async () => {
+      await stopStream();
+    });
+
+    startBtn.addEventListener('click', async () => {
+      const num_shots = Math.max(2, Math.min(50, parseInt(shotsInput.value || '10', 10)));
+      const delay_s = Math.max(0, Math.min(10, parseFloat(delayInput.value || '2.0')));
+      const threshold_px = Math.max(0, Math.min(1000, parseFloat(thrInput.value || '10.0')));
+
+      // ensure preview is stopped before capture
+      await stopStream();
+
+      startBtn.disabled = true;
+      resetBtn.disabled = true;
+      camSelect.disabled = true;
+      startStreamBtn.disabled = true;
+      stopStreamBtn.disabled  = true;
+      sendMesBtn.disabled = true;
+
+      note.textContent = 'Run started… capturing photos.';
+      try{
+        const r = await fetch('/capture_start', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ num_shots, delay_s, save:true, threshold_px, camera_idx: selectedCam })
+        });
+        const j = await r.json();
+        if(!r.ok || !j.ok){
+          note.textContent = 'Failed to start: ' + (j.error || r.statusText);
+          startBtn.disabled = false;
+          resetBtn.disabled = false;
+          camSelect.disabled = false;
+          startStreamBtn.disabled = false;
+          stopStreamBtn.disabled  = true;
+          sendMesBtn.disabled = false;
+          return;
+        }
+        // polling loop will manage the rest
+      }catch(e){
+        console.error(e);
+        note.textContent = 'Failed to start run.';
+        startBtn.disabled = false;
+        resetBtn.disabled = false;
+        camSelect.disabled = false;
+        startStreamBtn.disabled = false;
+        stopStreamBtn.disabled  = true;
+        sendMesBtn.disabled = false;
+      }
+    });
+
+    resetBtn.addEventListener('click', async () => {
+      try{
+        await fetch('/reset', { method:'POST' });
+        // Clear UI
+        bar.style.width='0%';
+        document.getElementById('statusText').textContent='Idle';
+        document.getElementById('progText').textContent='0/0';
+        shotsBody.innerHTML='';
+        grid.innerHTML='';
+        shotsTable.style.display='none';
+        paramsText.textContent='—';
+        rollingText.textContent='ROLLING: NO';
+        statusDot.classList.remove('good');
+        note.textContent='';
+      }catch(e){ console.error(e); }
+    });
+
+    // >>> MODIFIED: include click-time end ISO and optional station_id; let server use rolling state for roller_ok
+    sendMesBtn.addEventListener('click', () => {
+      if (sendMesBtn.disabled) return;
+      const endISO = new Date().toISOString();
+      const params = new URLSearchParams({ redirect: 'all', end: endISO });
+      const station_id = (stationInput.value || '').trim();
+      if (station_id) params.append('station_id', station_id);
+      // server will create the record and then redirect to /results
+      window.location.href = `/rolling/send_to_mes?${params.toString()}`;
+    });
+
+    // Init
+    uiSetPreviewState(false);
+    pollStatusOnce();
+    startPolling();
+    window.addEventListener('beforeunload', async () => {
+      try { await stopStream(); } catch(e){}
+      stopPolling();
+    });
+  </script>
+</body>
+</html>

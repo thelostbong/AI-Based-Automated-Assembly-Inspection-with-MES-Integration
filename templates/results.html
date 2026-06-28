@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>MES Results</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    :root{--bg:#0e101a;--card:#141828;--muted:#9aa3c7;--text:#e8eeff;--good:#19d27f;--bad:#ff5577;--accent:#7aa2ff;--shadow:0 12px 40px rgba(0,0,0,.35);--radius:16px}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:radial-gradient(900px 400px at 10% -10%,#1a2050,transparent),var(--bg);color:var(--text)}
+    header{padding:20px 24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    h1{margin:0;font-size:22px}
+    .btn{font-size:14px;padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);color:var(--text);text-decoration:none}
+    .btn:hover{background:rgba(255,255,255,.16)}
+    main{max-width:1200px;margin:0 auto;padding:0 24px 24px;display:grid;gap:16px}
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
+    .chip{padding:6px 10px;border-radius:999px;font-size:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.18)}
+    .ok{color:var(--good);font-weight:700}
+    .no{color:var(--bad);font-weight:700}
+    .muted{color:var(--muted)}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left}
+    th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+    details{background:#101324;border:1px solid #2a3250;border-radius:12px;padding:10px}
+    pre{margin:8px 0 0;white-space:pre-wrap;word-break:break-word}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    #filter{width:240px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--text)}
+  </style>
+</head>
+<body>
+  <header>
+    <a class="btn" href="/">← Back</a>
+    <h1>MES Results</h1>
+    <a class="btn" href="/results">View All</a>
+    {% if record_id %}<span class="chip">Record: <b>{{ record_id }}</b></span>{% endif %}
+  </header>
+
+  <main>
+    {% if rows %}
+      <!-- FULL TABLE VIEW -->
+      <section class="card">
+  <div class="row" style="justify-content:space-between;margin-bottom:8px">
+    <div class="row">
+      <span class="chip">Count: {{ rows|length }}</span>
+      {% if error %}<span class="chip no">Fetch error: {{ error }}</span>{% endif %}
+    </div>
+    <div class="row">
+      <input id="filter" type="text" placeholder="Filter… (label, station, id)"/>
+      <a class="btn" href="/results">Refresh</a>
+    </div>
+  </div>
+
+  <div style="overflow:auto; max-width:100%;">
+    <table id="tbl" style="min-width:1200px">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Record</th>
+          <th>Station</th>
+          <th>Start</th>
+          <th>End</th>
+          <th>Duration (ms)</th>
+          <th>Label</th>
+          <th>Rolling</th>
+          <th>Cabin OK</th>
+          <th>Motor Cover OK</th>
+          <th>Pos. of Light</th>
+          <th>Top Light Mode</th>
+          <th>Tires OK</th>
+          <th>Front Tire</th>
+          <th>Rear Tire</th>
+          <th>All Parts OK</th>
+          <th>Overall</th>
+          <th>Found (count)</th>
+          <th>Found (list)</th>
+          <th>Missing</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td><a href="/results/{{ r.record_id }}">{{ r.record_id or '—' }}</a></td>
+          <td>{{ r.station_id or '—' }}</td>
+          <td>{{ r.start_dt or '—' }}</td>
+          <td>{{ r.end_dt or '—' }}</td>
+          <td>{{ r.duration_ms if r.duration_ms is not none else '—' }}</td>
+          <td>{{ r.label or 'Unknown' }}</td>
+
+          <td>{% if r.roller_ok is none %}—{% elif r.roller_ok %}<span class="ok">YES</span>{% else %}<span class="no">NO</span>{% endif %}</td>
+          <td>{% if r.cabin_ok is none %}—{% elif r.cabin_ok %}<span class="ok">YES</span>{% else %}<span class="no">NO</span>{% endif %}</td>
+          <td>{% if r.motor_cover_ok is none %}—{% elif r.motor_cover_ok %}<span class="ok">YES</span>{% else %}<span class="no">NO</span>{% endif %}</td>
+          <td>{% if r.position_of_light is none %}—{% elif r.position_of_light %}<span class="ok">YES</span>{% else %}<span class="no">NO</span>{% endif %}</td>
+
+          <td>{{ r.top_light_mode or '—' }}</td>
+          <td>{% if r.tires_ok is none %}—{% elif r.tires_ok %}<span class="ok">YES</span>{% else %}<span class="no">NO</span>{% endif %}</td>
+          <td>{{ r.front_tire_type or '—' }}</td>
+          <td>{{ r.rear_tire_type or '—' }}</td>
+          <td>{% if r.all_parts_ok is none %}—{% elif r.all_parts_ok %}<span class="ok">YES</span>{% else %}<span class="no">NO</span>{% endif %}</td>
+
+          <td>{% if r.overall_result is none %}—{% elif r.overall_result %}<span class="ok">PASS</span>{% else %}<span class="no">FAIL</span>{% endif %}</td>
+          <td>{{ r.found_count if r.found_count is not none else '—' }}</td>
+          <td>
+            {% if r.found is string %}
+              {{ r.found }}
+            {% elif r.found %}
+              {{ r.found|join('; ') }}
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if r.missing is string %}
+              {{ r.missing }}
+            {% elif r.missing %}
+              {{ r.missing|join('; ') }}
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+    {% else %}
+      <!-- SINGLE RECORD VIEW -->
+      <section class="card">
+        <div class="row" style="justify-content:space-between">
+          <div class="row">
+            <span class="chip">Label: <b>{{ label or 'Unknown' }}</b></span>
+            {% if overall_result is not none %}
+              {% if overall_result %}<span class="chip ok">Overall: PASS</span>
+              {% else %}<span class="chip no">Overall: FAIL</span>{% endif %}
+            {% endif %}
+            {% if roller_ok is not none %}
+              {% if roller_ok %}<span class="chip ok">Rolling: YES</span>
+              {% else %}<span class="chip no">Rolling: NO</span>{% endif %}
+            {% endif %}
+          </div>
+          <div class="row">
+            {% if station_id %}<span class="chip">Station: {{ station_id }}</span>{% endif %}
+            {% if start_dt %}<span class="chip">Start: {{ start_dt }}</span>{% endif %}
+            {% if end_dt %}<span class="chip">End: {{ end_dt }}</span>{% endif %}
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3 style="margin:0 0 8px">Detected Features</h3>
+        {% if found and found|length %}
+          <ul>
+            {% for f in found %}<li>{{ f }}</li>{% endfor %}
+          </ul>
+        {% else %}
+          <div class="muted">No features recorded.</div>
+        {% endif %}
+      </section>
+
+      <section class="card">
+        <h3 style="margin:0 0 8px">Missing</h3>
+        {% if missing and missing|length %}
+          <ul>
+            {% for m in missing %}<li>{{ m }}</li>{% endfor %}
+          </ul>
+        {% else %}
+          <div class="muted">None.</div>
+        {% endif %}
+      </section>
+
+      <section class="card">
+        <details>
+          <summary>Raw payload</summary>
+          {% if error %}<div class="no">Fetch error: {{ error }}</div>{% endif %}
+          <pre>{{ (raw or {}) | tojson(indent=2) }}</pre>
+        </details>
+      </section>
+    {% endif %}
+  </main>
+
+  {% if rows %}
+  <script>
+    // Simple client-side filter
+    const filter = document.getElementById('filter');
+    const tbl = document.getElementById('tbl').querySelector('tbody');
+    filter.addEventListener('input', () => {
+      const q = filter.value.toLowerCase();
+      for (const tr of tbl.querySelectorAll('tr')) {
+        const text = tr.innerText.toLowerCase();
+        tr.style.display = text.includes(q) ? '' : 'none';
+      }
+    });
+  </script>
+  {% endif %}
+</body>
+</html>

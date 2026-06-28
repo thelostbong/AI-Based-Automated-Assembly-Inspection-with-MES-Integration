@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Lego Assembly Detector and Verifier</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root{
+      --bg:#0b0b0f; --card:#12131a; --muted:#b7bec9; --text:#e8edf2; --accent:#7aa2ff; --good:#36c275; --bad:#ff5d76;
+      --shadow:0 12px 40px rgba(0,0,0,.4); --radius:16px;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(1200px 600px at 20% -10%, #1b1e2b, transparent), var(--bg);color:var(--text);font-family:ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial}
+    header{padding:24px 20px;display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}
+    .title{font-size:clamp(18px,2.6vw,26px);font-weight:700;letter-spacing:.3px}
+    .chip{background:#1b2030;color:#cbd5e1;border:1px solid #2a2f42;padding:6px 10px;border-radius:999px;font-size:12px}
+    .container{max-width:1320px;margin:0 auto;padding:0 16px 40px}
+    .controls{display:flex;gap:12px;align-items:center;margin:20px 0 8px;flex-wrap:wrap}
+    button{
+      appearance:none;border:1px solid #2a3350;background:linear-gradient(180deg,#212742,#1a1f35);
+      color:#eaf0ff;padding:10px 16px;border-radius:10px;cursor:pointer;font-weight:600;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 10px 30px rgba(0,0,0,.25);
+      transition:transform .06s ease, filter .06s ease, opacity .2s ease;
+    }
+    button:hover{filter:brightness(1.05)}
+    button:active{transform:translateY(1px)}
+    button[disabled]{opacity:.6;cursor:not-allowed}
+    .detect{border-color:#3355ff;background:linear-gradient(180deg,#2a47ff,#243ed4)}
+    .mini{padding:6px 10px;font-size:12px}
+    .linkbtn{display:inline-flex;align-items:center;text-decoration:none}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+    .card{background:linear-gradient(180deg,#151826,#10121a);border:1px solid #24283b;border-radius:var(--radius);padding:12px;box-shadow:var(--shadow)}
+    .card h3{margin:6px 8px 10px;font-size:14px;opacity:.9;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .frame{aspect-ratio:16/9;width:100%;background:#090a10;border-radius:12px;display:grid;place-items:center;overflow:hidden;border:1px solid #1f2334}
+    img.preview{width:100%;height:100%;object-fit:contain;display:block}
+    .status{display:flex;gap:10px;align-items:center;margin-top:4px;flex-wrap:wrap}
+    .dot{width:10px;height:10px;border-radius:50%;display:inline-block;background:#888}
+    .ok{background:var(--good)} .fail{background:var(--bad)}
+    .loader{width:18px;height:18px;border-radius:50%;border:3px solid rgba(255,255,255,.15);border-top-color:#fff;animation:spin .9s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+    footer{opacity:.6;text-align:center;padding:18px 0 28px;font-size:12px}
+    @media (max-width:980px){.grid{grid-template-columns:1fr}}
+    .badge{display:inline-flex;align-items:center;gap:6px;padding:8px 10px;border-radius:10px;border:1px solid #2a2f42;background:#161b28;font-size:13px;margin-right:8px;margin-bottom:8px}
+    .good{border-color:#2e6047;background:#112018;color:#b9f3d0}
+    .bad{border-color:#5a2c3e;background:#221217;color:#ffc0cb}
+    .label{font-weight:800;letter-spacing:.5px;font-size:18px;padding:8px 12px;border-radius:10px;display:inline-block;background:#13221a;border:1px solid #1e3a2f;color:#bff2d0}
+    #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e2a40;border:1px solid #3355ff;color:#eaf0ff;padding:12px 20px;border-radius:12px;font-size:14px;z-index:999;box-shadow:0 8px 32px rgba(0,0,0,.5);display:none}
+    #mesStatus{margin-top:10px;font-size:13px;opacity:.85}
+  </style>
+</head>
+<body>
+  <header class="container">
+    <div class="title">Lego Assembly Detector and Verifier</div>
+    <div class="chip">Model: <span class="mono">{{ model_name }}</span></div>
+    <div class="chip">imgsz: <span class="mono">{{ imgsz }}</span></div>
+    <div class="chip">conf: <span class="mono">{{ conf }}</span></div>
+    <div class="status" style="gap:8px">
+      <a class="linkbtn" href="/calibrate"><button class="mini" title="Open camera calibration page">Calibrate Camera</button></a>
+      <a class="linkbtn" href="/results"><button class="mini" title="View Tulip table results">View All Results</button></a>
+      <div id="statusText" class="chip">Ready</div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="controls">
+      <button id="detectBtn" class="detect">Detect (Sequential)</button>
+      <div id="busy" style="display:none" class="loader" aria-label="loading"></div>
+      <button id="refreshBtn" class="mini">Refresh Health</button>
+      <div class="status">
+        {% for idx in cams %}
+          <span class="chip" id="chip-{{ idx }}">
+            Cam {{ idx }}:
+            {% if cams_status[idx] %}
+              <span class="dot ok"></span> ready
+            {% else %}
+              <span class="dot fail"></span> offline
+            {% endif %}
+          </span>
+        {% endfor %}
+      </div>
+    </div>
+
+    <section class="grid" id="grid">
+      {% for idx in cams %}
+      <div class="card" data-idx="{{ idx }}">
+        <h3>
+          <span>Camera {{ idx }}</span>
+          <span class="mono" id="perlabel-{{ loop.index0 }}" style="opacity:.8;font-size:12px"></span>
+        </h3>
+        <div class="frame"><img class="preview" id="img{{ loop.index0 }}" alt="preview {{ idx }}" /></div>
+      </div>
+      {% endfor %}
+    </section>
+
+    <section class="card" style="margin-top:18px">
+      <h3 style="margin:6px 8px 10px">Final Result (Union of 3)</h3>
+      <div id="finalLabel" class="label">—</div>
+
+      <h4 style="margin:14px 0 8px">Detected features (union)</h4>
+      <div id="found" style="display:flex; flex-wrap:wrap"></div>
+
+      <h4 style="margin:14px 0 8px">Missing features (required)</h4>
+      <div id="missing" style="display:flex; flex-wrap:wrap"></div>
+
+      <!-- Auto MES submission status shown here -->
+      <div id="mesStatus"></div>
+
+      <!-- Only Rolling button remains -->
+      <div style="margin-top:16px; display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+        <button id="btnStartRolling" class="detect" disabled title="Requires front wheel roller detected">
+          Start Rolling Detection
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+  <footer>© YOLO Detector</footer>
+
+  <script>
+  const CAMS = {{ cams | tojson }};
+
+  const detectBtn   = document.getElementById('detectBtn');
+  const refreshBtn  = document.getElementById('refreshBtn');
+  const busy        = document.getElementById('busy');
+  const statusEl    = document.getElementById('statusText');
+  const mesStatusEl = document.getElementById('mesStatus');
+  const btnStartRolling = document.getElementById('btnStartRolling');
+
+  const cardEls   = Array.from(document.querySelectorAll('.card[data-idx]'));
+  const imgEls    = cardEls.map(card => card.querySelector('img.preview'));
+  const frameEls  = cardEls.map(card => card.querySelector('.frame'));
+  const perLabels = cardEls.map(card => card.querySelector('[id^="perlabel-"]'));
+
+  // --- toast helper ---
+  function showToast(msg, durationMs = 4000) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.style.display = 'block';
+    setTimeout(() => { toast.style.display = 'none'; }, durationMs);
+  }
+
+  // === Auto-submit to Tulip MES after every detection run ===
+  async function submitToMes(found, label, missing, startTs) {
+    mesStatusEl.textContent = '⏳ Submitting to MES…';
+    mesStatusEl.style.color = '#cbd5e1';
+    try {
+      const res = await fetch('/send_mes', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          found:    found,
+          label:    label,
+          missing:  missing,
+          start_ts: startTs,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        mesStatusEl.textContent = `✅ MES submitted — QC ID: ${data.qc_id}`;
+        mesStatusEl.style.color = '#36c275';
+        showToast(`✅ MES record created: ${data.qc_id}`);
+      } else {
+        mesStatusEl.textContent = `❌ MES error: ${data.error}`;
+        mesStatusEl.style.color = '#ff5d76';
+        showToast(`❌ MES failed: ${data.error}`, 6000);
+      }
+    } catch(e) {
+      mesStatusEl.textContent = `❌ Network error: ${e}`;
+      mesStatusEl.style.color = '#ff5d76';
+      showToast(`❌ Network error: ${e}`, 6000);
+    }
+  }
+
+  function setStatus(t){ if(statusEl) statusEl.textContent = t; }
+
+  function setChip(idx, state){
+    const el = document.getElementById('chip-' + idx);
+    if(!el) return;
+    const map = {
+      ready:   '<span class="dot ok"></span> ready',
+      offline: '<span class="dot fail"></span> offline',
+      cap:     '<span class="dot"></span> capturing…'
+    };
+    el.innerHTML = `Cam ${idx}: ${map[state] || ''}`;
+  }
+
+  function badge(text, good=true) {
+    const span = document.createElement('span');
+    span.className = 'badge ' + (good ? 'good' : 'bad');
+    span.textContent = text;
+    return span;
+  }
+
+  async function fetchJSON(url, opts){
+    const res = await fetch(url, opts || {});
+    if(!res.ok) throw new Error(url + ' -> HTTP ' + res.status);
+    return res.json();
+  }
+
+  async function updateHealth(){
+    try{
+      const data = await fetchJSON('/health');
+      const st = data && data.camera_status || {};
+      for(const idx of CAMS){
+        const s = st[idx] || {};
+        const ok = !!(s.opened && s.has_frame);
+        setChip(idx, ok ? 'ready' : 'offline');
+      }
+      setStatus('Health refreshed');
+    }catch(e){
+      console.error(e);
+      setStatus('Health refresh failed');
+    }
+  }
+
+  async function detectOne(idx){
+    try{
+      return await fetchJSON(`/detect_cam/${idx}`, { method:'POST' });
+    }catch(e){
+      return { ok:false, idx, image:"", found:[], label:"Unknown", missing:["error"], msg:String(e) };
+    }
+  }
+
+  function resetUiForNewRun(){
+    imgEls.forEach(img => { if(img){ img.src = ''; img.alt = ''; }});
+    frameEls.forEach(fr => fr && fr.classList.remove('loading'));
+    perLabels.forEach(el => { if(el) el.textContent = ''; });
+
+    const finalLabelEl = document.getElementById('finalLabel');
+    const foundEl      = document.getElementById('found');
+    const missingEl    = document.getElementById('missing');
+
+    finalLabelEl.textContent        = '—';
+    finalLabelEl.style.background   = '#13221a';
+    finalLabelEl.style.borderColor  = '#1e3a2f';
+    finalLabelEl.style.color        = '#bff2d0';
+    foundEl.innerHTML               = '';
+    missingEl.innerHTML             = '';
+    mesStatusEl.textContent         = '';
+
+    CAMS.forEach((idx, i) => setChip(idx, i === 0 ? 'cap' : 'offline'));
+    detectBtn.disabled = true;
+    busy.style.display = 'inline-block';
+    setStatus('Starting detection…');
+    if (btnStartRolling) btnStartRolling.disabled = true;
+  }
+
+  function setFinalLabelStyle(isUnknown){
+    const finalLabelEl = document.getElementById('finalLabel');
+    finalLabelEl.style.background   = isUnknown ? '#2a1417' : '#13221a';
+    finalLabelEl.style.borderColor  = isUnknown ? '#5a2c3e' : '#1e3a2f';
+    finalLabelEl.style.color        = isUnknown ? '#ffc0cb' : '#bff2d0';
+  }
+
+  async function runSequentialDetect(){
+    resetUiForNewRun();
+
+    const runStartTs  = Date.now() / 1000;    // Unix seconds for MES
+    const runStartIso = new Date().toISOString();
+
+    const foundUnion   = new Set();
+    const finalLabelEl = document.getElementById('finalLabel');
+    const foundEl      = document.getElementById('found');
+    const missingEl    = document.getElementById('missing');
+
+    try{
+      for(let k = 0; k < CAMS.length; k++){
+        const camIdx = CAMS[k];
+        setChip(camIdx, 'cap');
+        setStatus(`Capturing & detecting camera ${camIdx} (${k+1}/${CAMS.length})…`);
+
+        const data = await detectOne(camIdx);
+
+        const imgEl     = imgEls[k];
+        const labelSlot = perLabels[k];
+        if(imgEl){
+          if(data.ok && data.image && data.image.startsWith('data:image')){
+            imgEl.src = data.image;
+            imgEl.alt = `preview ${camIdx}`;
+            setChip(camIdx, 'ready');
+          }else{
+            imgEl.src = '';
+            imgEl.alt = 'No image';
+            setChip(camIdx, 'offline');
+          }
+        }
+        if(labelSlot){
+          labelSlot.textContent = (data && data.label) ? `[ ${data.label} ]` : `[ Unknown ]`;
+        }
+        (data.found || []).forEach(n => foundUnion.add(n));
+      }
+
+      // Final classify
+      const resp = await fetch('/classify', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ found: Array.from(foundUnion), start: runStartIso })
+      }).then(r=>r.json());
+
+      finalLabelEl.textContent = resp.label || 'Unknown';
+      setFinalLabelStyle(resp.label === 'Unknown');
+
+      (resp.found   || []).forEach(n => foundEl.appendChild(badge(n, true)));
+      (resp.missing || []).forEach(n => missingEl.appendChild(badge(n, false)));
+
+      setStatus('Detection complete — submitting to MES…');
+
+      // Enable Rolling button only if front wheel roller detected
+      const hasFrontRoller = (resp.found || []).includes('front wheel roller');
+      if (btnStartRolling) btnStartRolling.disabled = !hasFrontRoller;
+
+      // === AUTO-SUBMIT to Tulip MES — no button needed ===
+      await submitToMes(
+        resp.found   || Array.from(foundUnion),
+        resp.label   || 'Unknown',
+        resp.missing || [],
+        runStartTs
+      );
+
+      setStatus('Detection complete');
+
+    }catch(err){
+      console.error(err);
+      setStatus('Error during detection');
+    }finally{
+      busy.style.display = 'none';
+      detectBtn.disabled = false;
+    }
+  }
+
+  btnStartRolling?.addEventListener('click', () => {
+    if (!btnStartRolling.disabled) window.location.href = '/rolling';
+  });
+
+  detectBtn.addEventListener('click', runSequentialDetect);
+  refreshBtn?.addEventListener('click', updateHealth);
+  updateHealth();
+  </script>
+
+</body>
+</html>

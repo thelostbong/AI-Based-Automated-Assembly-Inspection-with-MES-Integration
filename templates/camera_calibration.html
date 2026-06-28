@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Camera Calibration (Zoom Control)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root{
+      --bg:#0b0b0f; --card:#12131a; --muted:#b7bec9; --text:#e8edf2; --accent:#7aa2ff; --good:#36c275; --bad:#ff5d76;
+      --shadow:0 12px 40px rgba(0,0,0,.4); --radius:16px;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(1200px 600px at 20% -10%, #1b1e2b, transparent), var(--bg);color:var(--text);font-family:ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial}
+    header{padding:20px;display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}
+    .title{font-size:clamp(18px,2.6vw,26px);font-weight:700;letter-spacing:.3px}
+    .chip{background:#1b2030;color:#cbd5e1;border:1px solid #2a2f42;padding:6px 10px;border-radius:999px;font-size:12px}
+    .container{max-width:1100px;margin:0 auto;padding:0 16px 40px}
+    .card{background:linear-gradient(180deg,#151826,#10121a);border:1px solid #24283b;border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)}
+    .row{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:12px 0}
+    select, input[type="number"], input[type="range"]{
+      background:#101421;border:1px solid #2a2f42;border-radius:10px;color:#e8edf2;padding:8px 10px;font-weight:600
+    }
+    input[type="range"]{ width:260px; accent-color: var(--accent); }
+    button{
+      appearance:none;border:1px solid #2a3350;background:linear-gradient(180deg,#212742,#1a1f35);
+      color:#eaf0ff;padding:10px 16px;border-radius:10px;cursor:pointer;font-weight:700;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 10px 30px rgba(0,0,0,.25);
+      transition:transform .06s ease, filter .06s ease, opacity .2s ease;
+    }
+    button:hover{filter:brightness(1.05)}
+    button:active{transform:translateY(1px)}
+    button[disabled]{opacity:.6;cursor:not-allowed}
+    .frame{aspect-ratio:16/9;width:100%;background:#090a10;border-radius:12px;display:grid;place-items:center;overflow:hidden;border:1px solid #1f2334; position:relative;margin-top:10px}
+    .status{display:flex;flex-wrap:wrap;gap:8px}
+    .dot{width:10px;height:10px;border-radius:50%;display:inline-block;background:#888}
+    .ok{background:var(--good)} .fail{background:var(--bad)}
+    a{color:#9fb7ff;text-decoration:none}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+  </style>
+</head>
+<body>
+<header class="container">
+  <div class="title">Camera Calibration (Zoom Control)</div>
+  <div class="status">
+    {% for idx in cams %}
+      <span class="chip" id="chip-{{ idx }}">
+        Cam {{ idx }}:
+        {% if cams_status[idx] %}
+          <span class="dot ok"></span> ready
+        {% else %}
+          <span class="dot fail"></span> offline
+        {% endif %}
+      </span>
+    {% endfor %}
+  </div>
+  <div class="chip"><a href="/">← Back to Detector</a></div>
+</header>
+
+<main class="container">
+  <div class="card">
+    <div class="row">
+      <label>Camera:&nbsp;
+        <select id="camSel">
+          {% for idx in cams %}
+            <option value="{{ idx }}">Cam {{ idx }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <button id="startBtn">Start Stream</button>
+      <button id="stopBtn">Stop Stream</button>
+
+      <span class="chip" id="statusChip">idle</span>
+    </div>
+
+    <div class="row">
+      <label>Zoom (zoom_absolute):</label>
+      <input type="range" id="zoomRange" min="100" max="500" step="1" value="160">
+      <input type="number" id="zoomNum" min="1" max="10000" step="1" value="160" style="width:90px">
+      <button id="applyBtn">Apply</button>
+      <button id="readBtn">Read</button>
+      <span class="chip">Current: <span class="mono" id="zoomCur">—</span></span>
+    </div>
+
+    <div class="frame">
+      <img id="stream" alt="live stream" style="width:100%;height:100%;object-fit:contain"/>
+    </div>
+  </div>
+</main>
+
+<script>
+  const CAMS = {{ cams | tojson }};
+  const camSel   = document.getElementById('camSel');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn  = document.getElementById('stopBtn');
+  const streamEl = document.getElementById('stream');
+  const statusEl = document.getElementById('statusChip');
+
+  const zoomRange = document.getElementById('zoomRange');
+  const zoomNum   = document.getElementById('zoomNum');
+  const zoomCur   = document.getElementById('zoomCur');
+
+  function setStatus(t){ statusEl.textContent = t; }
+
+  function setChip(idx, state){
+    const el = document.getElementById('chip-' + idx);
+    if(!el) return;
+    const map = {
+      ready:   '<span class="dot ok"></span> ready',
+      offline: '<span class="dot fail"></span> offline',
+      cap:     '<span class="dot"></span> streaming…'
+    };
+    el.innerHTML = `Cam ${idx}: ${map[state] || ''}`;
+  }
+
+  // Keep range & number inputs in sync
+  function syncFromRange(){ zoomNum.value = zoomRange.value; }
+  function syncFromNum(){
+    let v = parseInt(zoomNum.value || '160', 10);
+    if (Number.isNaN(v)) v = 160;
+    zoomRange.value = String(v);
+  }
+  zoomRange.addEventListener('input', syncFromRange);
+  zoomNum.addEventListener('input', syncFromNum);
+
+  async function j(url, opts){
+    const r = await fetch(url, opts || {});
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }
+
+  async function startStream(){
+    const idx = parseInt(camSel.value, 10);
+    setStatus('starting…');
+    await j('/calib/start/' + idx, { method:'POST' });
+    // Set stream src (cache-buster)
+    streamEl.src = '/calib/stream/' + idx + '?t=' + Date.now();
+    setChip(idx, 'cap');
+    setStatus('streaming');
+    // Try reading current zoom right away
+    try{
+      const info = await j('/calib/zoom?idx=' + idx);
+      if(info.ok && info.zoom != null){
+        zoomCur.textContent = info.zoom;
+        zoomRange.value = info.zoom;
+        zoomNum.value   = info.zoom;
+      }
+    }catch(e){}
+  }
+
+  async function stopStream(){
+    setStatus('stopping…');
+    await j('/calib/stop', { method:'POST' });
+    // Drop the img src to stop the connection from client side too
+    const old = streamEl.src;
+    streamEl.src = '';
+    // Reset chips
+    CAMS.forEach(i => setChip(i, 'ready'));
+    setStatus('idle');
+  }
+
+  async function applyZoom(){
+    const idx = parseInt(camSel.value, 10);
+    const zoom = parseInt(zoomNum.value || '160', 10);
+    setStatus('setting zoom…');
+    try{
+      const r = await j('/calib/zoom', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ idx, zoom })
+      });
+      if(r.ok){
+        zoomCur.textContent = r.zoom;
+        zoomRange.value = r.zoom;
+        zoomNum.value   = r.zoom;
+        setStatus('zoom set');
+      }else{
+        setStatus('zoom set failed');
+        console.error(r);
+      }
+    }catch(e){
+      setStatus('zoom set error');
+      console.error(e);
+    }
+  }
+
+  async function readZoom(){
+    const idx = parseInt(camSel.value, 10);
+    setStatus('reading zoom…');
+    try{
+      const r = await j('/calib/zoom?idx=' + idx);
+      if(r.ok){
+        zoomCur.textContent = r.zoom;
+        zoomRange.value = r.zoom;
+        zoomNum.value   = r.zoom;
+        setStatus('read ok');
+      }else{
+        setStatus('read failed');
+      }
+    }catch(e){
+      setStatus('read error');
+      console.error(e);
+    }
+  }
+
+  // Wire up
+  startBtn.addEventListener('click', startStream);
+  stopBtn.addEventListener('click',  stopStream);
+  document.getElementById('applyBtn').addEventListener('click', applyZoom);
+  document.getElementById('readBtn').addEventListener('click',  readZoom);
+</script>
+</body>
+</html>

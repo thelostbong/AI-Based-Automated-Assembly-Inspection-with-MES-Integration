@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../val/images
+test: ../test/images
+
+nc: 20
+names: ['closed_cabin', 'closed_motor_cover', 'correct_seat_one', 'correct_seat_two', 'front_wheel_cover', 'front_wheel_roller', 'front_wheel_tire', 'light_bar', 'light_bar_with_one_light', 'misplaced_seat', 'no_Roller_Wheel', 'no_front_wheel_cover', 'open_cabin', 'open_motor_cover', 'rear_wheel_roller', 'rear_wheel_tire', 'steering_wheel', 'top_light_one', 'top_light_two', 'wr12c_front_wheel']
+
+roboflow:
+  workspace: thesis-0jqhr
+  project: legodetect-zaeo9
+  version: 13
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/thesis-0jqhr/legodetect-zaeo9/dataset/13
