@@ -246,4 +246,4 @@ MIT License — see [LICENSE](LICENSE).
 
 ---
 
-*This repository accompanies a Master's thesis project at Deggendorf Institute of Technology. Camera images, model weights, and Tulip workspace details are specific to the original lab setup and will need to be adapted for any other deployment.*
+*This repository accompanies a project at Deggendorf Institute of Technology. Camera images, model weights, and Tulip workspace details are specific to the original lab setup and will need to be adapted for any other deployment.*
