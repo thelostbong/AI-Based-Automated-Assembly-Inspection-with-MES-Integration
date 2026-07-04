@@ -1,0 +1,14 @@
+# Core dependencies for AI-Based Automated Assembly Inspection (Raspberry Pi 5)
+# Package names verified against the imports in app_onnx_pi.py, cam_check.py,
+# cam_control.py, and tulip_client.py.
+#
+# Versions are intentionally left open here. After a working install on the Pi,
+# pin them with `pip freeze > requirements.txt` so the environment is reproducible.
+
+flask
+opencv-python
+ultralytics
+onnxruntime
+pyyaml
+python-dotenv
+requests
