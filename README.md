@@ -23,7 +23,7 @@
 <p align="center">
   <img src="static/rolling/M9YL4L9RXS/lego_page.jpeg" alt="Camera view of a LEGO assembly at the inspection station" width="60%">
 </p>
-<p align="center"><em>One of three fixed camera views feeding the inspection pipeline.</em></p>
+<p align="center"><em>Website for fixed camera views feeding the inspection pipeline.</em></p>
 
 ## Overview
 
