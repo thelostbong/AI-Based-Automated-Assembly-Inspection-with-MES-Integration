@@ -21,7 +21,7 @@
 
 <!-- HERO: replace with a GIF/screenshot of the live detector UI — three camera views with boxes, the resolved variant code, and the MES toast. See asset punch-list. -->
 <p align="center">
-  <img src="static/rolling/M9YL4L9RXS/shot_00.jpg" alt="Camera view of a LEGO assembly at the inspection station" width="60%">
+  <img src="static/rolling/M9YL4L9RXS/lego_page.jpeg" alt="Camera view of a LEGO assembly at the inspection station" width="60%">
 </p>
 <p align="center"><em>One of three fixed camera views feeding the inspection pipeline.</em></p>
 
