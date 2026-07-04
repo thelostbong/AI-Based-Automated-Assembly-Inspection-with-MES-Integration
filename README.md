@@ -1,249 +1,181 @@
-# AI-Based Automated Assembly Inspection with MES Integration
+<h1 align="center">AI-Based Assembly Inspection with MES Integration</h1>
 
-A computer-vision quality-control system that classifies LEGO assembly variants in real time using a Raspberry Pi 5, three USB cameras, and a custom-trained YOLOv12 model — with results reported automatically to a **Tulip MES** (Manufacturing Execution System) table for traceability.
+<p align="center">
+  Real-time LEGO assembly-variant inspection on a Raspberry Pi 5: three USB cameras, a custom YOLOv12s model, and automatic result reporting into a Tulip MES for traceability — all running at the edge.
+</p>
 
-This project replicates and extends a Master's thesis at **Deggendorf Institute of Technology** on automated assembly inspection, moving the original detection pipeline from a development laptop onto an edge device (Raspberry Pi 5) and wiring it into a live MES.
+<p align="center">
+  <img src="https://img.shields.io/github/license/thelostbong/AI-Based-Automated-Assembly-Inspection-with-MES-Integration" alt="License">
+  <img src="https://img.shields.io/github/last-commit/thelostbong/AI-Based-Automated-Assembly-Inspection-with-MES-Integration" alt="Last commit">
+  <img src="https://img.shields.io/badge/edge-Raspberry%20Pi%205-c51a4a" alt="Raspberry Pi 5">
+  <img src="https://img.shields.io/badge/model-YOLOv12s-informational" alt="Model">
+  <img src="https://img.shields.io/badge/MES-Tulip-1a73e8" alt="Tulip MES">
+</p>
 
----
+<p align="center">
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#mes-integration">MES integration</a> ·
+  <a href="#troubleshooting">Troubleshooting</a>
+</p>
 
-## Table of Contents
-
-- [Overview](#overview)
-- [How It Works](#how-it-works)
-- [Hardware](#hardware)
-- [Repository Structure](#repository-structure)
-- [Setup](#setup)
-- [Configuration (.env)](#configuration-env)
-- [Running the App](#running-the-app)
-- [MES Integration](#mes-integration)
-- [Camera Calibration & Diagnostics](#camera-calibration--diagnostics)
-- [Known Issues & Troubleshooting](#known-issues--troubleshooting)
-- [Roadmap](#roadmap)
-- [License](#license)
-
----
+<!-- HERO: replace with a GIF/screenshot of the live detector UI — three camera views with boxes, the resolved variant code, and the MES toast. See asset punch-list. -->
+<p align="center">
+  <img src="static/rolling/M9YL4L9RXS/shot_00.jpg" alt="Camera view of a LEGO assembly at the inspection station" width="60%">
+</p>
+<p align="center"><em>One of three fixed camera views feeding the inspection pipeline.</em></p>
 
 ## Overview
 
-A LEGO model (a small vehicle kit) moves through 16 valid assembly variants depending on which interchangeable parts are fitted — front/rear wheel type (roller vs. tire), top light configuration, and seat variant. The system:
+A small LEGO vehicle kit ships in 16 valid build variants, depending on which interchangeable parts are fitted: front and rear wheel type (roller vs. tire), top-light configuration, and seat variant. Telling those variants apart by eye on a line is slow and error-prone, and any result that isn't captured is invisible to the rest of the factory.
 
-1. Captures one frame from each of three fixed-position USB cameras.
-2. Runs a YOLO object-detection model (exported to ONNX) on each frame to find assembly features (cabin closed, light bar, wheel type, seat type, etc.).
-3. Unions the features found across all three camera views.
-4. Applies a deterministic rule set to resolve the union into one of 16 valid variant codes (e.g. `RW21C`), or `Unknown` if the combination doesn't match any valid variant.
-5. Posts the result — along with timestamps, duration, and per-feature status — to a Tulip MES table as a new record, for downstream dashboards and traceability.
+This system does it automatically at the station. Three fixed USB cameras each grab a frame; a YOLOv12s model (exported to ONNX) finds assembly features in each view; the features are unioned across all three angles; a deterministic rule set resolves that union into one of 16 variant codes (e.g. `RW21C`) or flags `Unknown` when nothing matches. The result — with timestamps, duration, and per-feature pass/fail — is posted to a Tulip MES table as a new record. Everything but that final POST runs locally on the Pi.
 
-The whole pipeline runs locally on the Pi; only the final structured result is sent over the network to Tulip.
+It's a re-implementation and edge port of a Deggendorf Institute of Technology thesis on automated assembly inspection, moving the original laptop-based pipeline onto a Raspberry Pi 5 and wiring it into a live MES.
 
-## How It Works
+## How it works
 
 ```
    Cam 0          Cam 1          Cam 2
      │              │              │
-     ▼              ▼              ▼
-  capture()      capture()      capture()      (sequential open→warm→snap→close
-     │              │              │            to avoid USB bus contention)
-     ▼              ▼              ▼
-  YOLOv12s ONNX inference (per camera)
+     ▼              ▼              ▼          sequential open→warm→snap→close
+  capture()      capture()      capture()     to avoid USB bus contention
      │              │              │
      ▼              ▼              ▼
-  features found (canonicalized class names)
+        YOLOv12s ONNX inference (per view)
      │              │              │
      └──────────────┴──────────────┘
                     ▼
-         union of all features found
+          union of detected features
                     ▼
-        deterministic classification
-        (Front)(Rear)(Top)(Seat)C
+       deterministic rule set → variant code
+          (Front)(Rear)(Top)(Seat)C
                     ▼
-        valid code?  ──No──▶  "Unknown" + missing/ambiguous parts
-                    │
-                   Yes
+       valid code?  ──No──▶  "Unknown" + missing/ambiguous parts
+                    │ Yes
                     ▼
-     POST record to Tulip MES table
-     (station, timestamps, duration,
-      label, per-feature booleans,
-      found/missing feature lists)
+       POST record → Tulip MES table
 ```
 
-The detector runs as a Flask web app. The browser-side UI calls `/detect_cam/<idx>` for each camera in turn, then posts the union of detected features to `/classify` to get the final variant code. Once a result is produced, the frontend automatically submits it to the MES via `/send_mes` — no manual confirmation button required.
+The detector is a Flask app. The browser UI calls `/detect_cam/<idx>` for each camera in turn, posts the combined features to `/classify` for the final code, then auto-submits to the MES via `/send_mes` — no manual confirm step. Capturing one camera at a time (open, warm up, grab, release) is deliberate: opening all three USB webcams at once causes bus contention on the Pi.
+
+## Model & dataset
+
+The detector is a YOLOv12s model trained on a custom 20-class Roboflow dataset ([`legodetect-zaeo9` v13](https://universe.roboflow.com/thesis-0jqhr/legodetect-zaeo9/dataset/13), CC BY 4.0) and exported to ONNX (`best.onnx`). The 20 detection classes are assembly *features* — `closed_cabin`, `front_wheel_roller`, `rear_wheel_tire`, `top_light_one`, `correct_seat_one`, and so on — which the rule set then composes into the 16 variant codes.
+
+> [!NOTE]
+> A held-out mAP / accuracy number for the model is not committed to this repo. If you have the YOLOv12s validation metrics from training, add them here — a quality-control classifier is far more convincing to a reader with a real number and the set it was measured on.
 
 ## Hardware
 
 | Component | Spec |
 |---|---|
 | Compute | Raspberry Pi 5 (16 GB RAM) |
-| Cameras | 3× Logitech C922 Pro Stream Webcam (USB, MJPG @ 1280×720) |
-| Model | YOLOv12s, trained on a custom 20-class dataset, exported to ONNX (`best.onnx`) |
-| MES | Tulip (cloud), reached over HTTPS via REST API |
+| Cameras | 3× Logitech C922 Pro Stream (USB, MJPG @ 1280×720) |
+| Model | YOLOv12s → ONNX (`best.onnx`) |
+| MES | Tulip (cloud), over HTTPS REST |
 
-## Repository Structure
-
-```
-.
-├── app_onnx_pi.py        # Main Flask app: camera capture, YOLO inference,
-│                          # classification, calibration UI, MES submission
-├── cam_check.py           # CLI utility — probe /dev/video* devices, save a test snapshot
-├── cam_control.py         # Standalone MJPEG streaming/zoom test server (dev/debug tool)
-├── tulip_client.py        # Tulip REST API client + payload builder (build_record_from_domain)
-├── roller_detector.py     # Marker-based rolling/motion detector (auxiliary feature)
-├── data.yaml              # YOLO class names / dataset config used by the model
-├── best.onnx               # Exported YOLOv12s model weights (not tracked — see below)
-├── templates/              # Flask Jinja2 templates (detector UI, calibration page)
-├── static/                 # CSS/JS assets for the web UI
-├── .env.example             # Template for required environment variables
-└── .gitignore
-```
-
-> **Note:** `best.onnx` is a large binary model file. If you're cloning this repo, either fetch it separately (see [Setup](#setup)) or use [Git LFS](https://git-lfs.github.com/) if you choose to track it in version control.
-
-## Setup
-
-### 1. Flash and prep the Raspberry Pi
-
-- Flash Raspberry Pi OS (Bookworm) using Raspberry Pi Imager.
-- Enable SSH and set the hostname/credentials during imaging, or via `raspi-config` afterward.
-- Connect to Wi-Fi using `nmcli`. **If your SSID contains special characters like `!` (e.g. `FRITZ!Box`), wrap it in single quotes** to avoid shell interpretation issues:
-  ```bash
-  sudo nmcli device wifi connect 'FRITZ!Box 7520 LP' password 'your-password'
-  ```
-  Editing `network-config` directly on the `bootfs` partition is **not reliable** on Bookworm, since NetworkManager + cloud-init only honor it on first boot. If Wi-Fi config breaks, reflashing the SD card is usually faster than trying to patch it live.
-
-### 2. Connect cameras
-
-Plug in all three USB webcams, then confirm device paths:
+## Quickstart
 
 ```bash
-ls /dev/video*
-ls -l /dev/v4l/by-id/
-```
+git clone https://github.com/thelostbong/AI-Based-Automated-Assembly-Inspection-with-MES-Integration.git
+cd AI-Based-Automated-Assembly-Inspection-with-MES-Integration
 
-Note which `/dev/videoN` index corresponds to which physical camera — these are needed for the `CAM0`/`CAM1`/`CAM2` environment variables below. You can sanity-check each camera with:
-
-```bash
-python cam_check.py --devices /dev/video0 /dev/video2 /dev/video4
-```
-
-This opens each device, grabs a frame, and saves a test snapshot (`snapshot_<device>.jpg`) so you can visually confirm the right camera is mapped to the right index.
-
-### 3. Set up the Python environment
-
-```bash
-cd ~/testapp
 python3 -m venv piyolo
 source piyolo/bin/activate
-pip install -r requirements.txt   # see below if you don't have one yet
-```
+pip install -r requirements.txt
 
-If you don't already have a `requirements.txt`, install the core dependencies directly:
-
-```bash
-pip install flask opencv-python ultralytics onnxruntime pyyaml python-dotenv requests
-```
-
-> **Recreate the venv after restoring from a backup.** Copying a venv's `bin/` directory (e.g. from a Windows backup) loses the symlinks Python relies on. Always create a fresh venv on the Pi and reinstall dependencies rather than copying one over.
-
-### 4. Place model & config files
-
-Copy `best.onnx` and `data.yaml` into your project directory (e.g. `~/testapp/`), matching the paths you'll set in `.env`.
-
-## Configuration (.env)
-
-This project loads all device-specific and secret configuration from a `.env` file — **never commit this file**. Copy the template and fill in your own values:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Description |
-|---|---|
-| `WEIGHTS_PATH` | Absolute path to `best.onnx` |
-| `DATA_YAML_PATH` | Absolute path to `data.yaml` |
-| `CAM0`, `CAM1`, `CAM2` | Device paths for each camera (e.g. `/dev/video0`); prefer stable `/dev/v4l/by-id/...` symlinks over numeric indices if available |
-| `IMG_SIZE`, `CONF_THRESHOLD` | YOLO inference image size and confidence threshold |
-| `HOST`, `PORT` | Flask bind address/port (default `0.0.0.0:5000`) |
-| `FRAME_WIDTH`, `FRAME_HEIGHT`, `FRAME_FPS`, `FOURCC` | Camera capture settings |
-| `STATION_ID` | Identifier reported to Tulip for this inspection station |
-| `TULIP_BASE` | Tulip API base URL, e.g. `https://<tenant>.tulip.co/api/v3` |
-| `TULIP_AUTH_HEADER` | HTTP Basic auth header for your **own** Tulip API key (`Basic <base64>`) |
-| `TULIP_TABLE_UID` | UID of the Tulip table records are written to |
-| `MACHINE_ID`, `UID_ATTRIBUTE_ID`, `TABLE_ID_ATTRIBUTE_ID` | Tulip machine/attribute IDs, if using attribute reporting |
-
-**⚠️ Security note:** generate your own Tulip API key (Tulip → Settings → API Tokens) rather than reusing one shared by a teammate or found elsewhere — API keys are tied to an individual account and should not be shared or committed to source control. Double-check `.env` is listed in `.gitignore` before your first commit, and rotate any key that may have been exposed.
-
-## Running the App
-
-```bash
-source ~/testapp/piyolo/bin/activate
-cd ~/testapp
+cp .env.example .env        # then fill in camera paths, Tulip URL + API key
 python app_onnx_pi.py
 ```
 
-Then visit, from any device on the same network:
+Then open `http://<pi-ip>:5000/` for the detector, or `/calibrate` for the camera setup page.
 
-- `http://<pi-ip-address>:5000/` — main detector UI
-- `http://<pi-ip-address>:5000/calibrate` — camera calibration page
-
-Or locally on the Pi itself:
+Before the first run, map your cameras and sanity-check them:
 
 ```bash
-python app_onnx_pi.py &
-chromium http://localhost:5000
+ls /dev/video*
+python cam_check.py --devices /dev/video0 /dev/video2 /dev/video4
 ```
 
-### Key Flask routes
+This grabs a frame from each device and saves a snapshot, so you can confirm which physical camera is `CAM0` / `CAM1` / `CAM2` in `.env`.
 
-| Route | Method | Purpose |
-|---|---|---|
-| `/` | GET | Main detector UI |
-| `/detect_cam/<idx>` | POST | Capture + run YOLO on one camera, return annotated image and detected features |
-| `/classify` | POST | Resolve the union of detected features into a final variant code |
-| `/send_mes` | POST | Build a Tulip record from the final result and submit it |
-| `/health` | GET | Quick camera probe + current runtime settings |
-| `/calibrate` | GET | Camera calibration UI (live stream + zoom control) |
-| `/calib/stream/<idx>` | GET | MJPEG live stream for the selected camera |
-| `/calib/zoom` | GET/POST | Read or set hardware zoom via `v4l2-ctl` |
+> [!WARNING]
+> If your Wi-Fi SSID contains `!` (e.g. `FRITZ!Box`), single-quote it in `nmcli` or the shell will mangle it:
+> `sudo nmcli device wifi connect 'FRITZ!Box 7520 LP' password '…'`
 
-## MES Integration
+## Configuration
 
-Detection results are sent to a Tulip table via `tulip_client.py`. Each record includes:
+All device-specific and secret values live in `.env` (git-ignored). The key ones:
 
-- Station ID, start/end timestamps (UTC, RFC3339), duration (ms)
-- Final variant label (e.g. `RW21C`) or `Unknown`
-- Per-feature boolean statuses (motor cover fixed, roller function, cabin function, light position, tires correctly assembled, all parts attached, overall pass/fail)
-- Top light mode, front/rear tire type
-- Found features list + count, missing features list
+| Variable | Purpose |
+|---|---|
+| `WEIGHTS_PATH`, `DATA_YAML_PATH` | Absolute paths to `best.onnx` and `data.yaml` |
+| `CAM0`, `CAM1`, `CAM2` | Camera device paths — prefer `/dev/v4l/by-id/…` over `/dev/videoN` |
+| `IMG_SIZE`, `CONF_THRESHOLD` | YOLO inference size (640) and confidence (0.25) |
+| `FRAME_WIDTH/HEIGHT/FPS`, `FOURCC` | Capture settings (1280×720, MJPG) |
+| `STATION_ID` | Station identifier reported to Tulip |
+| `TULIP_BASE`, `TULIP_AUTH_HEADER`, `TULIP_TABLE_UID` | Tulip endpoint, Basic-auth header, target table |
 
-On success, the UI shows an inline MES status and a toast notification with the generated record ID (`QC-XXXXXXXX` format).
+> [!IMPORTANT]
+> Generate your own Tulip API key (Tulip → Settings → API Tokens). Keys are tied to an individual account — don't reuse a teammate's or commit one. Confirm `.env` is in `.gitignore` before your first push, and rotate any key that may have leaked.
 
-**Before your own deployment goes live:** create a personal Tulip API key rather than relying on one issued to a previous team member, since access tied to someone who has since left the project is fragile and not appropriate to keep using.
+## MES integration
 
-## Camera Calibration & Diagnostics
+Each inspection writes one Tulip record via `tulip_client.py`, containing: station ID; start/end timestamps (UTC RFC3339) and duration; the final variant label or `Unknown`; per-feature booleans (motor cover fixed, roller function, cabin function, light position, tires correct, all parts attached, overall pass/fail); top-light mode and front/rear tire type; and the found/missing feature lists. On success the UI shows an inline status and a toast with the generated record ID (`QC-XXXXXXXX`).
 
-- **`/calibrate`** in the main app streams one camera at a time (MJPEG) and lets you adjust hardware zoom (`v4l2-ctl -c zoom_absolute=...`) with live readback. Switching the selected camera automatically stops the previous stream so only one camera is ever open at once.
-- **`cam_control.py`** is a separate, standalone Flask server for lower-level camera testing — start/stop a capture session, adjust software zoom, and view a raw MJPEG stream or single snapshot, independent of the YOLO pipeline.
-- **`cam_check.py`** is a one-off CLI sanity check: lists detected `/dev/video*` devices and `by-id` symlinks, opens each requested device, confirms it can read a frame at the requested resolution/FPS, and saves a snapshot.
+## Repository structure
 
-## Known Issues & Troubleshooting
+```
+.
+├── app_onnx_pi.py     # Main Flask app: capture, YOLO inference, classification, calibration, MES POST
+├── cam_check.py       # CLI: probe /dev/video* devices, save a test snapshot per camera
+├── cam_control.py     # Standalone MJPEG streaming/zoom test server (dev tool)
+├── tulip_client.py    # Tulip REST client + record builder (build_record_from_domain)
+├── data.yaml          # 20 YOLO class names + Roboflow dataset reference
+├── best.onnx          # Trained YOLOv12s weights (ONNX)  ← see note below
+├── templates/         # Flask/Jinja2 UI (detector, calibration, results, rolling)
+├── static/            # UI assets + sample camera captures
+└── .env.example       # Environment variable template
+```
 
-- **Wi-Fi SSIDs with `!`** (e.g. `FRITZ!Box`) can silently fail in `nmcli` and bash if not single-quoted.
-- **`network-config` on the `bootfs` partition** is only applied on first boot under Bookworm's NetworkManager/cloud-init setup — don't rely on editing it post-setup; reflash instead.
-- **`load_dotenv()` ordering matters** — it must be called before any other code reads environment-dependent variables, or those values will silently fall back to defaults.
-- **Route order matters in Flask** — `app.run()` must be the last line; any `@app.route` defined after it will never be registered.
-- **Backing up the venv naively breaks it** — copying `piyolo/bin/` across machines (e.g. from a Windows backup tool) loses symlinks. Recreate the venv from scratch after any restore.
-- **Hardcoded paths**: some scripts may still reference an older `/home/lego/testapp` path from earlier development — update these (e.g. via `sed`) to match your actual install path (e.g. `/home/<your-username>/testapp`).
-- **Backgrounding Flask**: when working over SSH and also opening a local browser, launch Flask with `&` first so the terminal session isn't blocked.
+> [!NOTE]
+> `best.onnx` is a 36 MB binary committed directly to the repo, which bloats every clone. Move it to a GitHub Release or Git LFS and fetch it during setup instead of tracking it in-tree.
+
+## Camera calibration & diagnostics
+
+- `/calibrate` in the main app streams one camera at a time and adjusts hardware zoom (`v4l2-ctl -c zoom_absolute=…`) with live readback; switching cameras stops the previous stream so only one is ever open.
+- `cam_control.py` — standalone server for lower-level camera testing (start/stop capture, software zoom, raw MJPEG stream) independent of the YOLO pipeline.
+- `cam_check.py` — one-off CLI check: lists devices and `by-id` symlinks, confirms each opens at the requested resolution/FPS, and saves a snapshot.
+
+## Troubleshooting
+
+<details>
+<summary>Field notes from getting this running on Bookworm (click to expand)</summary>
+
+- **Wi-Fi SSIDs with `!`** (e.g. `FRITZ!Box`) silently fail in `nmcli`/bash unless single-quoted.
+- **`network-config` on the `bootfs` partition** is only honored on first boot under Bookworm's NetworkManager/cloud-init. Don't patch it live — reflashing the SD card is usually faster.
+- **`load_dotenv()` ordering** — call it before any code reads environment variables, or those reads silently fall back to defaults.
+- **Flask route order** — `app.run()` must be the last line; any `@app.route` after it never registers.
+- **Don't back up the venv by copying it** — copying `piyolo/bin/` across machines loses the symlinks Python needs. Recreate the venv and reinstall after any restore.
+- **Hardcoded paths** — some scripts may still reference an older `/home/lego/testapp` path; update them to your actual install path.
+- **Backgrounding Flask over SSH** — launch with `&` first if you also want to open a local browser, so the session isn't blocked.
+
+</details>
 
 ## Roadmap
 
-- [ ] Replace the inherited Tulip API credentials with a personal API key
-- [ ] Warm-up / cooldown timing optimization for camera capture cycles
-- [ ] Finalize university presentation materials
+- Commit real YOLOv12s validation metrics (mAP, per-class) and a labeled end-to-end accuracy for the 16-variant classification.
+- Add a screencast of the live detector + MES submission as the hero visual.
+- Move `best.onnx` out of the git tree (Release or LFS).
+- Replace inherited Tulip credentials with a personal API key.
+- Tune camera warm-up / cooldown timing to shorten the capture cycle.
 
-## License
+## License · Acknowledgements · Contact
 
-MIT License — see [LICENSE](LICENSE).
+Released under the MIT License — see [LICENSE](LICENSE). Dataset is CC BY 4.0 (Roboflow `legodetect-zaeo9`).
 
----
+Accompanies a project at the Deggendorf Institute of Technology. Camera setup, model weights, and Tulip workspace details are specific to the original lab and need adapting for any other deployment.
 
-*This repository accompanies a project at Deggendorf Institute of Technology. Camera images, model weights, and Tulip workspace details are specific to the original lab setup and will need to be adapted for any other deployment.*
+**Nayeemuddin Mohammed** — M.Sc. Applied AI for Digital Production Management, THD
+[GitHub](https://github.com/thelostbong) · [LinkedIn](https://linkedin.com/in/nayeemuddin-mohammed-03/) · nayeemuddin.mohammed@th-deg.de
